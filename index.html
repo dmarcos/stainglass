@@ -43,7 +43,12 @@
     <ol id="steps"></ol>
   </div>
 </div>
-<div id="loading">Cutting glass…</div>
+<div id="loading" role="status" aria-live="polite">
+  <img id="ldimg" alt="" width="64" height="96">
+  <div class="ldtext"><span class="ldera" id="ldera"></span><b id="ldtitle">Lead &amp; Light</b><span id="ldstep">Fetching the glass</span>
+    <div class="ldbar" aria-hidden="true"><i id="ldfill"></i></div></div>
+</div>
+<div id="sharp" class="chip" hidden>Sharpening the glass…</div>
 <div id="err"></div>
 
 <script type="importmap">

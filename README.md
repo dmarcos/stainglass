@@ -26,6 +26,8 @@ drifting morning light and titles; frames are saved by the script and encoded wi
 - `index.html`, `styles.css`, `main.js` — the page. `main.js` holds the photo-to-glass loader, style data, shaders and scene.
 - `windows/` — prebuilt textures per window: `_c.jpg` glass colour, `_l.png` (R lead relief, G paint, B window mask),
   `_i.png` iron or wood bars, `_src.jpg` source thumbnail, plus `meta.json` (sizes, lead width, outline).
+  `*_lo.*` are one-third-size previews (and `outside_lo.jpg` a small sky) shown first; the page then sharpens to the
+  full textures in the background. `build_textures.py` writes the previews along with the full textures.
 - `tools/fetch_photos.py` — downloads the source photographs into `tools/photos/` (already included).
 - `tools/build_textures.py` — keeps every line at the width it has in the photo, splits the window into pieces with a
   watershed on those lines (lines on piece boundaries become lead came, the rest painted detail) and writes `windows/`.

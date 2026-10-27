@@ -33,15 +33,25 @@ function edt(seed,W,H){const INF=1e20,n=Math.max(W,H),f=new Float64Array(n),d=ne
 
 // ---------------------------------------------------------------- photograph -> glass
 const loadImg=src=>new Promise((res,rej)=>{const i=new Image();i.decoding='async';i.onload=()=>res(i);i.onerror=()=>rej(new Error('Could not load '+src));i.src=src});
-function pixels(img){const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0);return x.getImageData(0,0,c.width,c.height).data}
+// fetch an image while reporting downloaded bytes
+async function fetchImg(src,onBytes){const r=await fetch(src);if(!r.ok)throw new Error('Could not load '+src);
+  const total=+r.headers.get('Content-Length')||0,rd=r.body.getReader(),parts=[];let got=0;
+  for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;onBytes&&onBytes(got,total)}
+  return createImageBitmap(new Blob(parts))}
+const tick=()=>new Promise(r=>setTimeout(r,0));
+function pixels(img){const c=document.createElement('canvas');c.width=img.naturalWidth||img.width;c.height=img.naturalHeight||img.height;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0);return x.getImageData(0,0,c.width,c.height).data}
 // hallmark coordinates are written as percentages of the source photograph; convert to the cropped window
 const toCrop=(st,x,y)=>{const[c0,r0,c1,r1]=st.crop;return[(x/100-c0)/(c1-c0),(y/100-r0)/(r1-r0)]};
 
-async function fromPhoto(key,st){
+// o.lo: use the small preview textures; o.progress(fraction, label) reports download and processing
+async function fromPhoto(key,st,o={}){
+  const say=o.progress||(()=>{}),sfx=o.lo?'_lo':'';
   if(!META)META=await(await fetch('windows/meta.json?v='+ASSET_V)).json();
-  const m=META[key];
-  const[ci,li,ii]=await Promise.all([loadImg(`windows/${key}_c.jpg?v=${ASSET_V}`),loadImg(`windows/${key}_l.png?v=${ASSET_V}`),m.iron?loadImg(`windows/${key}_i.png?v=${ASSET_V}`):null]);
-  const W=m.w,H=m.h,N=W*H,A=H/W,col=pixels(ci),ln=pixels(li),irn=ii?pixels(ii):null,r2=mulberry(key.length*977+3);
+  const m=META[key],names=['c.jpg','l.png'].concat(m.iron?['i.png']:[]).map(n=>n.replace('.',sfx+'.')),got=names.map(()=>0),want=names.map(()=>1);
+  const imgs=await Promise.all(names.map((n,i)=>fetchImg(`windows/${key}_${n}?v=${ASSET_V}`,(g,t)=>{got[i]=g;want[i]=t||g*1.2;
+    say(.7*got.reduce((a,b)=>a+b,0)/want.reduce((a,b)=>a+b,0),'Fetching the glass')})));
+  const[ci,li,ii]=imgs;say(.72,'Cutting the glass');await tick();
+  const W=ci.width,H=ci.height,N=W*H,A=H/W,col=pixels(ci),ln=pixels(li),irn=ii?pixels(ii):null,r2=mulberry(key.length*977+3);
   const mask=new Uint8Array(N),glass=new Uint8Array(N);
   for(let i=0,j=0;i<N;i++,j+=4){mask[i]=ln[j+2]>127?1:0;glass[i]=mask[i]&&ln[j]<6&&!(irn&&irn[j]>127)?1:0}
   // pieces = connected glass regions bounded by came
@@ -51,6 +61,7 @@ async function fromPhoto(key,st){
     if(l<0&&u<0){par[nl]=nl;lab[i]=nl++}else if(l>=0&&u>=0){lab[i]=l;const a=find(l),b=find(u);if(a!==b)par[Math.max(a,b)]=Math.min(a,b)}else lab[i]=l>=0?l:u}
   const remap=new Int32Array(nl).fill(-1);let nc=0;
   for(let i=0;i<N;i++)if(lab[i]>=0){const rt=find(lab[i]);if(remap[rt]<0)remap[rt]=nc++;lab[i]=remap[rt]}
+  say(.8,`Choosing glass for ${nc.toLocaleString()} pieces`);await tick();
   const notGlass=new Uint8Array(N);for(let i=0;i<N;i++)notGlass[i]=glass[i]?0:1;
   const dist=edt(notGlass,W,H);
   const sr=new Float32Array(nc),sg=new Float32Array(nc),sb=new Float32Array(nc),cnt=new Uint32Array(nc),dmax=new Float32Array(nc);
@@ -64,8 +75,9 @@ async function fromPhoto(key,st){
   for(const hm of st.hall){if(!hm.r)continue;const[cu,ct]=toCrop(st,hm.r[0],hm.r[1]),rx=hm.r[2]/100/(st.crop[2]-st.crop[0]),ry=hm.r[3]/100/(st.crop[3]-st.crop[1]);
     const y0=Math.max(0,Math.floor((ct-ry)*H)),y1=Math.min(H-1,Math.ceil((ct+ry)*H)),x0=Math.max(0,Math.floor((cu-rx)*W)),x1=Math.min(W-1,Math.ceil((cu+rx)*W));
     for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const dx=(x/W-cu)/rx,dy=(y/H-ct)/ry;if(dx*dx+dy*dy<=1)feat[y*W+x]=hm.f}}
+  say(.88,'Soldering the joints');await tick();
   // solder where three or more pieces meet
-  const hw=m.hw,R=Math.round(hw*2.2+3),dirs=[];for(let k=0;k<12;k++){const a=k/12*TAU;dirs.push(Math.round(Math.cos(a)*R),Math.round(Math.sin(a)*R))}
+  const hw=m.hw*W/m.w,R=Math.round(hw*2.2+3),dirs=[];for(let k=0;k<12;k++){const a=k/12*TAU;dirs.push(Math.round(Math.cos(a)*R),Math.round(Math.sin(a)*R))}
   const cell=R*1.6,grid=new Map(),blobs=[];
   for(let y=R;y<H-R;y+=1)for(let x=R;x<W-R;x++){const i=y*W+x,j=i*4;if(!mask[i]||ln[j]<240||(irn&&irn[j]>127))continue;
     let a=-1,b=-1,c=-1;for(let k=0;k<24;k+=2){const L=lab[(y+dirs[k+1])*W+x+dirs[k]];if(L<0||L===a||L===b)continue;if(a<0)a=L;else if(b<0)b=L;else{c=L;break}}
@@ -76,6 +88,7 @@ async function fromPhoto(key,st){
   for(const bl of blobs){const cx=bl.sx/bl.n,cy=bl.sy/bl.n,rs=hw*(1.05+.25*r2());
     for(let y=Math.max(0,Math.floor(cy-rs));y<=Math.min(H-1,Math.ceil(cy+rs));y++)for(let x=Math.max(0,Math.floor(cx-rs));x<=Math.min(W-1,Math.ceil(cx+rs));x++){
       const d=Math.hypot(x-cx,y-cy)/rs;if(d<1){const i=y*W+x,v=Math.sqrt(1-d*d)*255;if(v>sold[i])sold[i]=v}}}
+  say(.95,'Setting it in the light');await tick();
   // pack textures, rows flipped so v runs upward
   const lin=new Float32Array(256);for(let i=0;i<256;i++){const c=i/255;lin[i]=c<=.04045?c/12.92:Math.pow((c+.055)/1.055,2.4)}
   const toS=new Uint8Array(4096);for(let i=0;i<4096;i++){const v=i/4095;toS[i]=Math.round((v<=.0031308?v*12.92:1.055*Math.pow(v,1/2.4)-.055)*255)}
@@ -782,17 +795,39 @@ $('#play').onclick=()=>{playing=!playing;if(playing){playT=0;stage=0;stageTarget
 function updateSteps(){const cur=Math.min(5,Math.ceil(stage-.02));stepsEl.querySelectorAll('li').forEach((li,i)=>{li.classList.toggle('done',i<cur||(i===cur&&stage>4.98));li.classList.toggle('now',i===cur)});
   $('#caption').textContent=(stage>4.98&&!playing)?'':ST.proc[cur];$('#play span').textContent=playing?'Pause':'Watch it made'}
 
+// first view uses small preview textures and a small sky, then everything sharpens in the background
+let loadId=0;
+function loadPano(name){return new THREE.TextureLoader().loadAsync(`windows/${name}?v=${ASSET_V}`).then(t=>{t.colorSpace=THREE.SRGBColorSpace;t.wrapS=THREE.RepeatWrapping;
+  t.minFilter=THREE.LinearMipmapLinearFilter;t.anisotropy=8;const old=GU.tPano.value;GU.tPano.value=t;if(old)old.dispose();t.userData.name=name})}
+function showLoading(st){const el=$('#loading');$('#ldimg').src=`windows/${KEY}_src.jpg`;$('#ldera').textContent=st.era;$('#ldtitle').textContent=st.win.title.replace(/[“”]/g,'');
+  $('#ldfill').style.width='0%';$('#ldstep').textContent='Fetching the glass';el.hidden=false}
+const setProgress=(f,label)=>{$('#ldfill').style.width=(100*f).toFixed(0)+'%';$('#ldstep').textContent=label};
+async function buildSet(st,o){const res=await fromPhoto(KEY,st,o),extras={};
+  for(const k of st.extras||[])extras[k]=await fromPhoto(k,{glassType:st.glassType,vary:st.vary,hall:[],crop:[0,0,1,1]},{lo:o.lo});
+  return{res,extras}}
 async function load(resetCam){
-  $('#loading').hidden=false;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-  $('#loading').textContent='Leading up '+STYLES[KEY].win.title+'…';
-  if(!GU.tPano.value){const t=await new THREE.TextureLoader().loadAsync('windows/outside.jpg?v='+ASSET_V);t.colorSpace=THREE.SRGBColorSpace;t.wrapS=THREE.RepeatWrapping;
-    t.minFilter=THREE.LinearMipmapLinearFilter;t.anisotropy=8;GU.tPano.value=t}
-  try{ST=STYLES[KEY];RES=await fromPhoto(KEY,ST);const extras={};
-    for(const k of ST.extras||[])extras[k]=await fromPhoto(k,{glassType:ST.glassType,vary:ST.vary,hall:[],crop:[0,0,1,1]});
+  const id=++loadId,st=STYLES[KEY],lo=!FILM;
+  showLoading(st);
+  const pano=GU.tPano.value?null:loadPano(FILM?'outside.jpg':'outside_lo.jpg');
+  try{const{res,extras}=await buildSet(st,{lo,progress:(f,l)=>id===loadId&&setProgress(f,l)});
+    if(pano)await pano;
+    if(id!==loadId)return;
+    ST=st;RES=res;setProgress(1,'Setting it in the room');await tick();
     applyWindow(ST,RES);buildRoom(ST,RES,extras);updatePanel(ST,RES);placeMarkers();feature=0;hlTarget=0;GU.uHL.value=0;if(HP.has('stage')){stage=stageTarget=+HP.get('stage');HP.delete('stage')}
     if(resetCam||!camera.userData.ok){const h=homeView();if(HP.get('near')){h.pos.copy(h.target).add(v3(.3,-.3,1.6+ST.env.depth))}camera.position.copy(h.pos);controls.target.copy(h.target);camera.userData.ok=1}else flyTo(homeView(),.9);
   }catch(err){$('#err').textContent=String(err.stack||err)}
-  $('#loading').hidden=true}
+  if(id===loadId)$('#loading').hidden=true;
+  if(lo&&id===loadId)sharpen(id)}
+async function sharpen(id){
+  await new Promise(r=>setTimeout(r,400));if(id!==loadId)return;
+  $('#sharp').hidden=false;
+  try{const{res,extras}=await buildSet(ST,{lo:false});
+    if(id!==loadId)return;
+    RES=res;applyWindow(ST,RES);if(Object.keys(extras).length||ST.env.compose)buildRoom(ST,RES,extras);
+    if(!feature){updatePanel(ST,RES);placeMarkers()}
+    if(GU.tPano.value&&GU.tPano.value.userData.name!=='outside.jpg')await loadPano('outside.jpg');
+  }catch(err){$('#err').textContent=String(err.stack||err)}
+  if(id===loadId)$('#sharp').hidden=true}
 
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);composer.setSize(w,h);camera.aspect=w/h;
   if(FILM)camera.clearViewOffset();else if(w>820)camera.setViewOffset(w,h,-(344+32)/2,0,w,h);else camera.setViewOffset(w,h,0,h*.2,w,h);camera.updateProjectionMatrix();

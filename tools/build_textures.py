@@ -18,8 +18,6 @@ PH = os.path.join(ROOT, 'tools', 'photos'); OUT = os.path.join(ROOT, 'windows')
 # hw: typical lead half width in px at that resolution; iron: min width in px of bars detected as iron
 W = {
  'gothic':     dict(src='gothic_hd', crop=[.14,.032,.87,.99], shape=('pointed',.176,1.15), res=4600, bright=.62, hw=3.2, iron=14, minseed=80),
- 'gothic_n':   dict(src='gothic_context', crop=[.576,.242,.913,.934], shape=('pointed',.214,1.34), res=2400, bright=.6, hw=2.0, minseed=40),
- 'gothic_o':   dict(src='gothic_context', crop=[.433,.119,.617,.224], shape=('circle',), square=True, res=900, bright=.6, hw=1.6, minseed=30),
  'victorian':  dict(src='victorian', crop=[.022,.03,.985,.972], shape=('rect',), res=3400, bright=.62, hw=2.4, minseed=60),
  'nouveau':    dict(src='nouveau', crop=[.004,.004,.982,.996], shape=('rect',), res=2700, bright=.62, hw=1.9, minseed=50),
  'deco':       dict(src='deco', crop=[.012,.004,.99,.996], shape=('rect',), res=2800, bright=.6, hw=2.6, iron=9, minseed=60),
@@ -135,6 +133,14 @@ def sharpen_chartres():
         a = wa[..., c][ov].astype(np.float32); b = bu[..., c][ov].astype(np.float32)
         wa[..., c] = np.clip((wa[..., c]-a.mean())*b.std()/max(a.std(), 1)+b.mean(), 0, 255)
     cv2.imwrite(out, (wa*mk+bu*(1-mk)).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 94])
+
+LO = 3   # preview textures are this many times smaller, so the first view appears quickly
+def save_preview(name):
+    for suf in ['c.jpg','l.png','i.png']:
+        f = f'{OUT}/{name}_{suf}'
+        if not os.path.exists(f): continue
+        im = Image.open(f); w,h = im.size; lo = im.resize((max(1,w//LO), max(1,h//LO)), Image.LANCZOS if suf != 'i.png' else Image.BOX)
+        base,ext = suf.split('.'); lo.save(f'{OUT}/{name}_{base}_lo.{ext}', quality=85) if ext == 'jpg' else lo.save(f'{OUT}/{name}_{base}_lo.{ext}', optimize=True)
 
 def build(name, c):
     im = Image.open(os.path.join(PH, c['src']+'.jpg')).convert('RGB'); iw, ih = im.size
@@ -258,6 +264,7 @@ def build(name, c):
     Image.fromarray((np.stack([lead, paint, mask], 2)*255+.5).astype(np.uint8)).save(f'{OUT}/{name}_l.png', optimize=True)
     if iron.any(): Image.fromarray((iron*255).astype(np.uint8)).save(f'{OUT}/{name}_i.png', optimize=True)
     th = Image.open(os.path.join(PH, c['src']+'.jpg')).convert('RGB'); th.thumbnail((520,520)); th.save(f'{OUT}/{name}_src.jpg', quality=82)
+    save_preview(name)
     print(name, w, h, 'pieces', len(np.unique(ws))-2, 'lead %.1f%%' % (100*(lead>.3).mean()), 'paint %.1f%%' % (100*(paint>.3).mean()), 'iron %.1f%%' % (100*iron.mean()))
     return dict(w=w, h=h, hw=hw, iron=bool(iron.any()), openings=holes, bars=c.get('bars',[]), outline=[[round(x/w,4),round(y/h,4)] for x,y in poly])
 
