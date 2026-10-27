@@ -117,7 +117,7 @@ async function fromPhoto(key,st,o={}){
   return{W,H,A,G,S,I,LT,avg:[ar/am,ag/am,ab/am],palette:sw.map(c=>toHex(...c)),types:Object.entries(tcount).map(([t,n])=>[+t,n/tot]).sort((a,b)=>b[1]-a[1]),
     spots,outline,perimU:4*hw/W,hwPx:hw,pieces:nc,joints:blobs.length}}
 
-const ASSET_V='202610261900';   // bump to make browsers fetch fresh window textures
+const ASSET_V='202610270938';   // bump to make browsers fetch fresh window textures
 let META=null; // windows/meta.json, written by tools/build_textures.py
 
 // ---------------------------------------------------------------- the windows
@@ -766,6 +766,7 @@ const navEl=$('#styles');ORDER.forEach(k=>{const b=document.createElement('butto
 let stage=5,stageTarget=5,playing=false,playT=0,hlTarget=0,feature=0,fly=null,pins=[];
 function updatePanel(st,res){
   navEl.querySelectorAll('button').forEach(b=>b.setAttribute('aria-selected',b.dataset.k===KEY));
+  if(isPhone()){const sel=navEl.querySelector('[aria-selected="true"]');sel&&navEl.scrollTo({left:sel.offsetLeft-(navEl.clientWidth-sel.offsetWidth)/2})}
   $('#era').textContent=st.era;$('#sname').textContent=st.name;$('#blurb').textContent=st.blurb;
   $('#facts').innerHTML=st.facts.map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join('');
   $('#swatches').innerHTML=res.palette.map(h=>`<div class="sw"><i style="background:${h}"></i><span>${h.slice(1)}</span></div>`).join('');
@@ -785,7 +786,7 @@ function selectHall(i){const h=ST.hall[i],same=feature===i+1;
   feature=i+1;stageTarget=5;playing=false;
   if(h.f>=16){hlTarget=0}else{GU.uFeature.value=h.f;hlTarget=1}
   const p=spotWorld(h.f),dist=h.f===13||h.f===15||h.f===14?2.6:1.9;flyTo({pos:p.clone().add(v3(.35,-.15,dist+ST.env.depth)),target:p})}
-$('#hallmarks').addEventListener('click',e=>{const b=e.target.closest('button');if(b)selectHall(+b.dataset.i)});
+$('#hallmarks').addEventListener('click',e=>{const b=e.target.closest('button');if(b){if(isPhone())setSheet(false);selectHall(+b.dataset.i)}});
 navEl.addEventListener('click',e=>{const b=e.target.closest('button');if(b&&b.dataset.k!==KEY){KEY=b.dataset.k;history.replaceState(null,'','#style='+KEY);load(true)}});
 $('#tod').oninput=e=>setTod(+e.target.value);
 $('#beams').onclick=e=>{const on=e.currentTarget.getAttribute('aria-pressed')!=='true';e.currentTarget.setAttribute('aria-pressed',on);rays.visible=on;if(dust)dust.visible=on};
@@ -829,8 +830,16 @@ async function sharpen(id){
   }catch(err){$('#err').textContent=String(err.stack||err)}
   if(id===loadId)$('#sharp').hidden=true}
 
+// phone bottom sheet: collapsed shows chips and the name; expanded shows the details
+let sheetH=120;
+const isPhone=()=>innerWidth<=820;
+function setSheet(open){document.body.classList.toggle('sheet',open);for(const b of[$('#grab'),$('#more')]){b.setAttribute('aria-expanded',open)}
+  $('#more').textContent=open?'Close':'Details';if(!open)$('#panel').scrollTop=0}
+for(const b of[$('#grab'),$('#more')])b.addEventListener('click',()=>setSheet(!document.body.classList.contains('sheet')));
+new ResizeObserver(()=>{if(!isPhone()||document.body.classList.contains('sheet'))return;const h=$('#panel').offsetHeight;
+  if(Math.abs(h-sheetH)>2){sheetH=h;document.documentElement.style.setProperty('--sheet-h',h+'px');resize()}}).observe($('#panel'));
 function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h,false);composer.setSize(w,h);camera.aspect=w/h;
-  if(FILM)camera.clearViewOffset();else if(w>820)camera.setViewOffset(w,h,-(344+32)/2,0,w,h);else camera.setViewOffset(w,h,0,h*.2,w,h);camera.updateProjectionMatrix();
+  if(FILM)camera.clearViewOffset();else if(w>820)camera.setViewOffset(w,h,-(344+32)/2,0,w,h);else camera.setViewOffset(w,h,0,sheetH*.45,w,h);camera.updateProjectionMatrix();
   dustMat.uniforms.uPx.value=h*renderer.getPixelRatio()/(2*Math.tan(camera.fov*Math.PI/360))*.006}
 addEventListener('resize',resize);
 
@@ -888,5 +897,6 @@ async function film(){
       await send(i++)}}
   await fetch('/done',{method:'POST'})}
 const FILM=HP.has('film');
+if(HP.has('sheet'))setSheet(true);
 resize();setTod(+$('#tod').value);
 if(FILM)film();else load(true).then(()=>requestAnimationFrame(frame));
